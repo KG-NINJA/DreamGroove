@@ -1,257 +1,115 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
-  <title>KG Voice Log</title>
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <style>
-    :root {
-      --bg: #0f1115;
-      --panel: #171a21;
-      --text: #f5f7fb;
-      --muted: #9aa3b2;
-      --accent: #6ea8fe;
-      --ok: #43c97b;
-      --err: #ff6b6b;
-      --border: #2a3140;
-    }
+export default {
+  async fetch(request, env) {
+    try {
 
-    * { box-sizing: border-box; }
+      // 🔥 あなたのPages URL
+      const allowedOrigin = "https://kg-ninja.github.io";
 
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      padding: 20px;
-    }
+      // CORS preflight
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    .wrap {
-      max-width: 720px;
-      margin: 0 auto;
-    }
+      if (!env.DREAM_BUCKET) {
+        return new Response("NO BUCKET", {
+          status: 500,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    h1 {
-      font-size: 24px;
-      margin: 0 0 10px;
-    }
+      if (request.method !== "POST") {
+        return new Response("NG", {
+          status: 405,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    p.note {
-      color: var(--muted);
-      margin: 0 0 20px;
-      line-height: 1.5;
-    }
+      // 🔥 Referer制限（ここ重要）
+      const referer = request.headers.get("referer") || "";
 
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
+      if (!referer.startsWith("https://kg-ninja.github.io/DreamGroove")) {
+        return new Response("Forbidden: bad referer", {
+          status: 403,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    label {
-      display: block;
-      font-size: 14px;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
+      // APIキー
+      const apiKey = request.headers.get("x-api-key");
+      if (apiKey !== env.API_KEY) {
+        return new Response("Unauthorized", {
+          status: 401,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    select,
-    textarea,
-    button {
-      width: 100%;
-      font: inherit;
-      border-radius: 12px;
-    }
+      // JSON取得
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response("JSON ERROR", {
+          status: 400,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    select,
-    textarea {
-      background: #0d1016;
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 12px;
-    }
+      const content = body.content || "";
+      const tag = body.tag || "voice";
+      const timestamp = body.timestamp || new Date().toISOString();
 
-    textarea {
-      min-height: 180px;
-      resize: vertical;
-      line-height: 1.6;
-    }
+      if (!content.trim()) {
+        return new Response("EMPTY CONTENT", {
+          status: 400,
+          headers: corsHeaders(allowedOrigin),
+        });
+      }
 
-    .row {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
+      // ファイル名
+      const safeTimestamp = timestamp.replace(/[:.]/g, "-");
+      const filename = `${tag}/${safeTimestamp}.md`;
 
-    button {
-      border: 0;
-      padding: 16px;
-      background: var(--accent);
-      color: #081120;
-      font-weight: 700;
-      cursor: pointer;
-    }
+      const fullContent = `# Voice Note
 
-    button.secondary {
-      background: #2a3140;
-      color: var(--text);
-    }
-
-    #status {
-      margin-top: 12px;
-      min-height: 1.5em;
-      color: var(--muted);
-      word-break: break-word;
-    }
-
-    .ok { color: var(--ok) !important; }
-    .err { color: var(--err) !important; }
-
-    .preview {
-      white-space: pre-wrap;
-      background: #0d1016;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      min-height: 120px;
-      line-height: 1.6;
-    }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>KG Voice Log</h1>
-    <p class="note">
-      iPhoneの音声キーボードで話して、送信するとCloudflare R2にMarkdownで保存します。
-    </p>
-
-    <div class="panel">
-      <div class="row">
-        <div>
-          <label for="tag">Tag</label>
-          <select id="tag">
-            <option value="voice">voice</option>
-            <option value="idea">idea</option>
-            <option value="memo">memo</option>
-          </select>
-        </div>
-
-        <div>
-          <label for="input">Input</label>
-          <textarea id="input" placeholder="ここをタップして、iPhoneのマイクで音声入力"></textarea>
-        </div>
-
-        <button id="sendBtn" type="button">Cloudflareに送信</button>
-        <button id="previewBtn" class="secondary" type="button">Markdownプレビュー更新</button>
-
-        <div id="status"></div>
-      </div>
-    </div>
-
-    <div class="panel">
-      <label>Markdown Preview</label>
-      <div id="preview" class="preview"></div>
-    </div>
-  </div>
-
-  <script>
-    const WORKER_URL = "https://dreamgroove1.fuwafuwow.workers.dev/";
-    const API_KEY = "mysecret123";
-
-    const input = document.getElementById("input");
-    const tag = document.getElementById("tag");
-    const sendBtn = document.getElementById("sendBtn");
-    const previewBtn = document.getElementById("previewBtn");
-    const preview = document.getElementById("preview");
-    const statusEl = document.getElementById("status");
-
-    function nowIso() {
-      return new Date().toISOString();
-    }
-
-    function buildMarkdown(text, selectedTag, timestamp) {
-      return `# Voice Note
-
-${text}
+${content}
 
 ---
 time: ${timestamp}
-tag: ${selectedTag}
+tag: ${tag}
 source: iphone
 `;
-    }
 
-    function setStatus(message, type = "") {
-      statusEl.textContent = message;
-      statusEl.className = type;
-    }
+      await env.DREAM_BUCKET.put(filename, fullContent);
 
-    function refreshPreview() {
-      const text = input.value.trim();
-      const selectedTag = tag.value;
-      const timestamp = nowIso();
-
-      if (!text) {
-        preview.textContent = "";
-        return;
-      }
-
-      preview.textContent = buildMarkdown(text, selectedTag, timestamp);
-    }
-
-    previewBtn.addEventListener("click", refreshPreview);
-
-    sendBtn.addEventListener("click", async () => {
-      const text = input.value.trim();
-      const selectedTag = tag.value;
-      const timestamp = nowIso();
-
-      if (!text) {
-        setStatus("入力が空です。", "err");
-        return;
-      }
-
-      const markdown = buildMarkdown(text, selectedTag, timestamp);
-      preview.textContent = markdown;
-      setStatus("送信中...");
-
-      try {
-        const res = await fetch(WORKER_URL, {
-          method: "POST",
+      return new Response(
+        JSON.stringify({
+          status: "OK",
+          file: filename,
+        }),
+        {
+          status: 200,
           headers: {
             "Content-Type": "application/json",
-            "x-api-key": API_KEY,
+            ...corsHeaders(allowedOrigin),
           },
-          body: JSON.stringify({
-            content: text,
-            tag: selectedTag,
-            timestamp: timestamp,
-          }),
-        });
-
-        const resultText = await res.text();
-
-        if (!res.ok) {
-          setStatus(`送信失敗: ${resultText}`, "err");
-          return;
         }
+      );
 
-        setStatus(`保存完了: ${resultText}`, "ok");
-        input.value = "";
-      } catch (e) {
-        setStatus("通信エラー: " + e.message, "err");
-      }
-    });
+    } catch (e) {
+      return new Response("ERROR: " + e.message, {
+        status: 500,
+        headers: corsHeaders("https://kg-ninja.github.io"),
+      });
+    }
+  },
+};
 
-    input.addEventListener("input", refreshPreview);
-    refreshPreview();
-  </script>
-</body>
-</html>
+function corsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, x-api-key",
+  };
+}
