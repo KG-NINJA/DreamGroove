@@ -1,24 +1,85 @@
-<button onclick="saveToDream()">保存</button>
+<button id="ptt">🎤 押して話す</button>
+<textarea id="output" rows="10" style="width:100%"></textarea>
 
 <script>
-async function saveToDream() {
-  const content = document.querySelector("#output").value;
+let recognition;
+let isRecording = false;
+let finalText = "";
+
+const btn = document.getElementById("ptt");
+const output = document.getElementById("output");
+
+if (!('webkitSpeechRecognition' in window)) {
+  alert("このブラウザは音声認識に対応していません");
+} else {
+  recognition = new webkitSpeechRecognition();
+  recognition.lang = "ja-JP";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalText += transcript + "\n";
+      } else {
+        interim += transcript;
+      }
+    }
+    output.value = finalText + interim;
+  };
+
+  recognition.onend = async () => {
+    if (isRecording) return;
+
+    // 🔥 録音終了 → 保存
+    await saveToCloudflare(finalText);
+    finalText = "";
+  };
+}
+
+// 🎤 押したら開始
+btn.onmousedown = () => {
+  isRecording = true;
+  recognition.start();
+};
+
+// 🛑 離したら終了
+btn.onmouseup = () => {
+  isRecording = false;
+  recognition.stop();
+};
+
+// 📱 スマホ対応
+btn.ontouchstart = () => {
+  isRecording = true;
+  recognition.start();
+};
+
+btn.ontouchend = () => {
+  isRecording = false;
+  recognition.stop();
+};
+
+// 🔥 Cloudflare保存
+async function saveToCloudflare(text) {
+  if (!text.trim()) return;
 
   const res = await fetch("https://dreamgroove1.fuwafuwow.workers.dev/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": "mysecret123"
+      "x-api-key": "ここにAPIキー"
     },
     body: JSON.stringify({
-      content: content,
+      content: text,
       tag: "voice",
       timestamp: new Date().toISOString()
     })
   });
 
   const data = await res.json();
-  console.log(data);
-  alert("保存：" + data.file);
+  console.log("saved:", data);
 }
 </script>
