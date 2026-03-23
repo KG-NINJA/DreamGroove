@@ -1,43 +1,118 @@
-<script>
-const button = document.getElementById("recordButton");
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DreamGroove Voice</title>
 
-let pressTimer = null;
+<style>
+body {
+  margin: 0;
+  font-family: -apple-system, sans-serif;
+  background: #0f1115;
+  color: #fff;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 20px;
+  margin-bottom: 10px;
+}
+
+textarea {
+  width: 100%;
+  height: 120px;
+  font-size: 16px;
+  border-radius: 12px;
+  padding: 10px;
+  border: 1px solid #333;
+  background: #111;
+  color: #fff;
+}
+
+button {
+  width: 100%;
+  margin-top: 12px;
+  padding: 18px;
+  font-size: 18px;
+  border-radius: 14px;
+  border: none;
+}
+
+#recordButton {
+  background: #007aff;
+  color: white;
+}
+
+#recordButton.recording {
+  background: red;
+}
+
+#status {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #aaa;
+}
+
+.preview {
+  margin-top: 15px;
+  background: #111;
+  padding: 10px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🎤 DreamGroove</h1>
+
+<button id="recordButton">押して話す</button>
+
+<textarea id="input" placeholder="音声入力される"></textarea>
+
+<div id="status">待機中</div>
+
+<div class="preview" id="preview"></div>
+
+<script>
+const WORKER_URL = "https://dreamgroove1.fuwafuwow.workers.dev/";
+const API_KEY = "mysecret123";
+
+const button = document.getElementById("recordButton");
+const input = document.getElementById("input");
+const preview = document.getElementById("preview");
+const status = document.getElementById("status");
+
 let isPressing = false;
 
-// 入力エリアを動的に作る
-const textarea = document.createElement("textarea");
-textarea.placeholder = "押しながら話す（マイクボタン）";
-textarea.style.width = "100%";
-textarea.style.height = "100px";
-textarea.style.marginTop = "10px";
+// Markdown生成
+function buildMarkdown(text) {
+  const timestamp = new Date().toISOString();
+  return `# Voice Note
 
-document.querySelector(".app").appendChild(textarea);
+${text}
 
-// 長押し開始
-button.addEventListener("touchstart", () => {
-  isPressing = true;
-  textarea.focus();
+---
+time: ${timestamp}
+tag: voice
+source: iphone
+`;
+}
 
-  document.getElementById("status").textContent = "🎤 入力中...";
-});
+// 送信
+async function send(text) {
+  if (!text.trim()) return;
 
-// 長押し終了
-button.addEventListener("touchend", async () => {
-  if (!isPressing) return;
-  isPressing = false;
-
-  const text = textarea.value.trim();
-
-  document.getElementById("status").textContent = "送信中...";
-
-  if (!text) return;
+  status.textContent = "送信中...";
 
   try {
-    const res = await fetch("https://dreamgroove1.fuwafuwow.workers.dev/", {
+    const res = await fetch(WORKER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": "mysecret123"
+        "x-api-key": API_KEY
       },
       body: JSON.stringify({
         content: text,
@@ -48,12 +123,47 @@ button.addEventListener("touchend", async () => {
 
     const result = await res.text();
 
-    document.getElementById("status").textContent = "保存完了: " + result;
+    if (!res.ok) {
+      status.textContent = "エラー: " + result;
+      return;
+    }
 
-    textarea.value = "";
+    status.textContent = "保存完了";
+    input.value = "";
+    preview.textContent = "";
 
   } catch (e) {
-    document.getElementById("status").textContent = "エラー";
+    status.textContent = "通信エラー";
   }
+}
+
+// Push-to-Talk（iPhone対応）
+button.addEventListener("touchstart", () => {
+  isPressing = true;
+
+  button.classList.add("recording");
+  status.textContent = "🎤 話してください";
+
+  input.focus(); // 音声キーボード起動
+});
+
+button.addEventListener("touchend", () => {
+  if (!isPressing) return;
+  isPressing = false;
+
+  button.classList.remove("recording");
+
+  const text = input.value;
+  preview.textContent = buildMarkdown(text);
+
+  send(text);
+});
+
+// プレビュー更新
+input.addEventListener("input", () => {
+  preview.textContent = buildMarkdown(input.value);
 });
 </script>
+
+</body>
+</html>
