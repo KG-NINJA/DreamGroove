@@ -3,83 +3,95 @@
 
 <script>
 let recognition;
-let isRecording = false;
-let finalText = "";
+let isPressing = false;
+let buffer = "";
 
 const btn = document.getElementById("ptt");
 const output = document.getElementById("output");
 
 if (!('webkitSpeechRecognition' in window)) {
-  alert("このブラウザは音声認識に対応していません");
+  alert("音声認識非対応");
 } else {
   recognition = new webkitSpeechRecognition();
   recognition.lang = "ja-JP";
-  recognition.continuous = true;
-  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.interimResults = false;
 
   recognition.onresult = (event) => {
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        finalText += transcript + "\n";
-      } else {
-        interim += transcript;
-      }
-    }
-    output.value = finalText + interim;
-  };
+    if (!isPressing) return;
 
-  recognition.onend = async () => {
-    if (isRecording) return;
-
-    // 🔥 録音終了 → 保存
-    await saveToCloudflare(finalText);
-    finalText = "";
+    const text = event.results[0][0].transcript;
+    buffer += text + "\n";
+    output.value = buffer;
   };
 }
 
-// 🎤 押したら開始
-btn.onmousedown = () => {
-  isRecording = true;
-  recognition.start();
-};
+// 🎤 押す
+function startPTT() {
+  if (isPressing) return;
+  isPressing = true;
+  buffer = "";
 
-// 🛑 離したら終了
-btn.onmouseup = () => {
-  isRecording = false;
-  recognition.stop();
-};
-
-// 📱 スマホ対応
-btn.ontouchstart = () => {
-  isRecording = true;
-  recognition.start();
-};
-
-btn.ontouchend = () => {
-  isRecording = false;
-  recognition.stop();
-};
-
-// 🔥 Cloudflare保存
-async function saveToCloudflare(text) {
-  if (!text.trim()) return;
-
-  const res = await fetch("https://dreamgroove1.fuwafuwow.workers.dev/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": "ここにAPIキー"
-    },
-    body: JSON.stringify({
-      content: text,
-      tag: "voice",
-      timestamp: new Date().toISOString()
-    })
-  });
-
-  const data = await res.json();
-  console.log("saved:", data);
+  try {
+    recognition.start();
+  } catch(e) {}
 }
+
+// 🛑 離す → 即保存（ここが核心）
+async function stopPTT() {
+  isPressing = false;
+  recognition.stop();
+
+  if (!buffer.trim()) return;
+
+  const timestamp = new Date().toISOString();
+
+  // 🔥 Markdown生成
+  const markdown = `# Voice Note
+
+${buffer}
+
+---
+time: ${timestamp}
+tag: voice
+source: browser
+`;
+
+  // 🔥 Cloudflare送信
+  try {
+    const res = await fetch("https://dreamgroove1.fuwafuwow.workers.dev/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "ここにAPIキー"
+      },
+      body: JSON.stringify({
+        content: buffer,
+        tag: "voice",
+        timestamp: timestamp
+      })
+    });
+
+    const data = await res.json();
+    console.log("saved:", data);
+
+  } catch (e) {
+    console.error("save error:", e);
+  }
+}
+
+// PC
+btn.addEventListener("mousedown", startPTT);
+btn.addEventListener("mouseup", stopPTT);
+
+// スマホ
+btn.addEventListener("touchstart", (e) => {
+  e.preventDefault();
+  startPTT();
+});
+
+btn.addEventListener("touchend", (e) => {
+  e.preventDefault();
+  stopPTT();
+});
 </script>
