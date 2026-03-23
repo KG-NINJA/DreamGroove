@@ -1,115 +1,59 @@
-export default {
-  async fetch(request, env) {
-    try {
+<script>
+const button = document.getElementById("recordButton");
 
-      // 🔥 あなたのPages URL
-      const allowedOrigin = "https://kg-ninja.github.io";
+let pressTimer = null;
+let isPressing = false;
 
-      // CORS preflight
-      if (request.method === "OPTIONS") {
-        return new Response(null, {
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+// 入力エリアを動的に作る
+const textarea = document.createElement("textarea");
+textarea.placeholder = "押しながら話す（マイクボタン）";
+textarea.style.width = "100%";
+textarea.style.height = "100px";
+textarea.style.marginTop = "10px";
 
-      if (!env.DREAM_BUCKET) {
-        return new Response("NO BUCKET", {
-          status: 500,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+document.querySelector(".app").appendChild(textarea);
 
-      if (request.method !== "POST") {
-        return new Response("NG", {
-          status: 405,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+// 長押し開始
+button.addEventListener("touchstart", () => {
+  isPressing = true;
+  textarea.focus();
 
-      // 🔥 Referer制限（ここ重要）
-      const referer = request.headers.get("referer") || "";
+  document.getElementById("status").textContent = "🎤 入力中...";
+});
 
-      if (!referer.startsWith("https://kg-ninja.github.io/DreamGroove")) {
-        return new Response("Forbidden: bad referer", {
-          status: 403,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+// 長押し終了
+button.addEventListener("touchend", async () => {
+  if (!isPressing) return;
+  isPressing = false;
 
-      // APIキー
-      const apiKey = request.headers.get("x-api-key");
-      if (apiKey !== env.API_KEY) {
-        return new Response("Unauthorized", {
-          status: 401,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+  const text = textarea.value.trim();
 
-      // JSON取得
-      let body;
-      try {
-        body = await request.json();
-      } catch {
-        return new Response("JSON ERROR", {
-          status: 400,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+  document.getElementById("status").textContent = "送信中...";
 
-      const content = body.content || "";
-      const tag = body.tag || "voice";
-      const timestamp = body.timestamp || new Date().toISOString();
+  if (!text) return;
 
-      if (!content.trim()) {
-        return new Response("EMPTY CONTENT", {
-          status: 400,
-          headers: corsHeaders(allowedOrigin),
-        });
-      }
+  try {
+    const res = await fetch("https://dreamgroove1.fuwafuwow.workers.dev/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "mysecret123"
+      },
+      body: JSON.stringify({
+        content: text,
+        tag: "voice",
+        timestamp: new Date().toISOString()
+      })
+    });
 
-      // ファイル名
-      const safeTimestamp = timestamp.replace(/[:.]/g, "-");
-      const filename = `${tag}/${safeTimestamp}.md`;
+    const result = await res.text();
 
-      const fullContent = `# Voice Note
+    document.getElementById("status").textContent = "保存完了: " + result;
 
-${content}
+    textarea.value = "";
 
----
-time: ${timestamp}
-tag: ${tag}
-source: iphone
-`;
-
-      await env.DREAM_BUCKET.put(filename, fullContent);
-
-      return new Response(
-        JSON.stringify({
-          status: "OK",
-          file: filename,
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders(allowedOrigin),
-          },
-        }
-      );
-
-    } catch (e) {
-      return new Response("ERROR: " + e.message, {
-        status: 500,
-        headers: corsHeaders("https://kg-ninja.github.io"),
-      });
-    }
-  },
-};
-
-function corsHeaders(origin) {
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, x-api-key",
-  };
-}
+  } catch (e) {
+    document.getElementById("status").textContent = "エラー";
+  }
+});
+</script>
